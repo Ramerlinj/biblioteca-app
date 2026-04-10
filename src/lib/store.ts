@@ -1,11 +1,14 @@
 import {
     createUserWithEmailAndPassword,
+    deleteUser,
+    getAuth,
     onAuthStateChanged,
     signInWithEmailAndPassword,
     signOut,
     updateProfile,
     type User as FirebaseUser,
 } from "firebase/auth";
+import { deleteApp, initializeApp } from "firebase/app";
 import {
     addDoc,
     collection,
@@ -16,15 +19,17 @@ import {
     query,
     setDoc,
     updateDoc,
-    where,
 } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase";
+import { auth, db, firebaseConfig } from "@/lib/firebase";
+
+export type UserRole = "usuario" | "admin" | "superadmin";
 
 export interface StoredUser {
     id: string;
     name: string;
     email: string;
     createdAt: string;
+    role: UserRole;
 }
 
 export interface Book {
@@ -40,6 +45,21 @@ export interface Book {
     coverUrl?: string;
     isFavorite: boolean;
     createdAt: string;
+}
+
+export interface DirectoryUser {
+    id: string;
+    name: string;
+    email: string;
+    createdAt: string;
+    role: UserRole;
+}
+
+function normalizeRole(value: unknown): UserRole {
+    if (value === "admin" || value === "superadmin" || value === "usuario") {
+        return value;
+    }
+    return "usuario";
 }
 
 function toIsoDate(value: unknown): string {
@@ -71,6 +91,16 @@ function normalizeBook(id: string, data: Record<string, unknown>): Book {
     };
 }
 
+function normalizeDirectoryUser(id: string, data: Record<string, unknown>): DirectoryUser {
+    return {
+        id,
+        name: String(data.name ?? "Usuario"),
+        email: String(data.email ?? ""),
+        createdAt: toIsoDate(data.createdAt),
+        role: normalizeRole(data.role),
+    };
+}
+
 function mapFirebaseUserToStoredUser(firebaseUser: FirebaseUser): StoredUser {
     return {
         id: firebaseUser.uid,
@@ -79,6 +109,7 @@ function mapFirebaseUserToStoredUser(firebaseUser: FirebaseUser): StoredUser {
         createdAt: firebaseUser.metadata.creationTime
             ? new Date(firebaseUser.metadata.creationTime).toISOString()
             : new Date().toISOString(),
+        role: "usuario",
     };
 }
 
@@ -106,6 +137,7 @@ async function resolveUserProfile(firebaseUser: FirebaseUser): Promise<StoredUse
             name: String(data.name ?? firebaseUser.displayName ?? "Usuario"),
             email: String(data.email ?? firebaseUser.email ?? ""),
             createdAt: toIsoDate(data.createdAt ?? firebaseUser.metadata.creationTime),
+            role: normalizeRole(data.role),
         };
     }
 
@@ -118,6 +150,7 @@ async function resolveUserProfile(firebaseUser: FirebaseUser): Promise<StoredUse
         createdAt: firebaseUser.metadata.creationTime
             ? new Date(firebaseUser.metadata.creationTime).toISOString()
             : new Date().toISOString(),
+        role: "usuario",
     };
 
     try {
@@ -127,6 +160,7 @@ async function resolveUserProfile(firebaseUser: FirebaseUser): Promise<StoredUse
                 name: profile.name,
                 email: profile.email,
                 createdAt: profile.createdAt,
+                role: profile.role,
             },
             { merge: true },
         );
@@ -177,6 +211,7 @@ export const Auth = {
                 name,
                 email,
                 createdAt,
+                role: "usuario",
             };
 
             try {
@@ -184,6 +219,7 @@ export const Auth = {
                     name: user.name,
                     email: user.email,
                     createdAt: user.createdAt,
+                    role: "usuario",
                 });
             } catch (error) {
                 if (!isPermissionDeniedError(error)) {
@@ -250,13 +286,14 @@ export interface ListBooksOptions {
     genre?: string;
     sort?: "az" | "za" | "newest" | "oldest";
     favorites?: boolean;
-    userId: string;
+    userId?: string;
 }
 
 const FIRESTORE_READ_TIMEOUT_MS = 8000;
 const FIRESTORE_WRITE_TIMEOUT_MS = 20000;
 const BOOKS_CACHE_TTL_MS = 15_000;
 const booksCache = new Map<string, { books: Book[]; fetchedAt: number }>();
+const ALL_BOOKS_CACHE_KEY = "all";
 
 function ensureOnlineForWrite(): void {
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
@@ -299,32 +336,32 @@ async function withTimeout<T>(promise: Promise<T>, ms = FIRESTORE_READ_TIMEOUT_M
     }
 }
 
-function getCachedBooks(userId: string): Book[] | null {
-    const entry = booksCache.get(userId);
+function getCachedBooks(): Book[] | null {
+    const entry = booksCache.get(ALL_BOOKS_CACHE_KEY);
     if (!entry) return null;
     if (Date.now() - entry.fetchedAt > BOOKS_CACHE_TTL_MS) return null;
     return entry.books;
 }
 
-function setCachedBooks(userId: string, books: Book[]): void {
-    booksCache.set(userId, { books, fetchedAt: Date.now() });
+function setCachedBooks(books: Book[]): void {
+    booksCache.set(ALL_BOOKS_CACHE_KEY, { books, fetchedAt: Date.now() });
 }
 
-function invalidateCachedBooks(userId: string): void {
-    booksCache.delete(userId);
+function invalidateCachedBooks(): void {
+    booksCache.delete(ALL_BOOKS_CACHE_KEY);
 }
 
-async function getAllUserBooks(userId: string): Promise<Book[]> {
-    const cached = getCachedBooks(userId);
+async function getAllBooks(): Promise<Book[]> {
+    const cached = getCachedBooks();
     if (cached) {
         return cached;
     }
 
     try {
-        const booksQuery = query(collection(db, "books"), where("userId", "==", userId));
+        const booksQuery = query(collection(db, "books"));
         const snapshot = await withTimeout(getDocs(booksQuery));
         const books = snapshot.docs.map((bookDoc) => normalizeBook(bookDoc.id, bookDoc.data()));
-        setCachedBooks(userId, books);
+        setCachedBooks(books);
         return books;
     } catch (error) {
         if (isRecoverableFirestoreReadError(error)) {
@@ -336,8 +373,8 @@ async function getAllUserBooks(userId: string): Promise<Book[]> {
 }
 
 export const Books = {
-    async list({ userId, search, genre, sort = "newest", favorites }: ListBooksOptions): Promise<Book[]> {
-        let books = await getAllUserBooks(userId);
+    async list({ search, genre, sort = "newest", favorites }: ListBooksOptions): Promise<Book[]> {
+        let books = await getAllBooks();
 
         if (genre && genre !== "all") {
             books = books.filter((book) => book.genre === genre);
@@ -367,10 +404,10 @@ export const Books = {
         return books;
     },
 
-    async get(id: string, userId: string): Promise<Book | null> {
-        const cached = getCachedBooks(userId);
+    async get(id: string, userId?: string): Promise<Book | null> {
+        const cached = getCachedBooks();
         if (cached) {
-            const fromCache = cached.find((book) => book.id === id && book.userId === userId) ?? null;
+            const fromCache = cached.find((book) => book.id === id) ?? null;
             if (fromCache) return fromCache;
         }
 
@@ -380,7 +417,7 @@ export const Books = {
         } catch (error) {
             if (isRecoverableFirestoreReadError(error)) {
                 console.warn("No se pudo leer detalle desde Firestore; devolviendo cache local", error);
-                return cached?.find((book) => book.id === id && book.userId === userId) ?? null;
+                return cached?.find((book) => book.id === id) ?? null;
             }
             throw error;
         }
@@ -390,10 +427,6 @@ export const Books = {
         }
 
         const book = normalizeBook(snapshot.id, snapshot.data());
-        if (book.userId !== userId) {
-            return null;
-        }
-
         return book;
     },
 
@@ -416,9 +449,9 @@ export const Books = {
 
         const createdDoc = await withTimeout(addDoc(collection(db, "books"), payload), FIRESTORE_WRITE_TIMEOUT_MS);
         const createdBook = normalizeBook(createdDoc.id, payload);
-        const cached = getCachedBooks(userId);
+        const cached = getCachedBooks();
         if (cached) {
-            setCachedBooks(userId, [createdBook, ...cached]);
+            setCachedBooks([createdBook, ...cached]);
         }
         return createdBook;
     },
@@ -455,12 +488,9 @@ export const Books = {
             ...data,
         };
 
-        const cached = getCachedBooks(userId);
+        const cached = getCachedBooks();
         if (cached) {
-            setCachedBooks(
-                userId,
-                cached.map((item) => (item.id === id ? updatedBook : item)),
-            );
+            setCachedBooks(cached.map((item) => (item.id === id ? updatedBook : item)));
         }
 
         return updatedBook;
@@ -482,12 +512,11 @@ export const Books = {
         }
 
         await withTimeout(deleteDoc(bookRef), FIRESTORE_WRITE_TIMEOUT_MS);
-        const cached = getCachedBooks(userId);
+        const cached = getCachedBooks();
         if (cached) {
-            setCachedBooks(
-                userId,
-                cached.filter((item) => item.id !== id),
-            );
+            setCachedBooks(cached.filter((item) => item.id !== id));
+        } else {
+            invalidateCachedBooks();
         }
         return true;
     },
@@ -515,19 +544,17 @@ export const Books = {
             isFavorite,
         };
 
-        const cached = getCachedBooks(userId);
+        const cached = getCachedBooks();
         if (cached) {
-            setCachedBooks(
-                userId,
-                cached.map((item) => (item.id === id ? updatedBook : item)),
-            );
+            setCachedBooks(cached.map((item) => (item.id === id ? updatedBook : item)));
         }
 
         return updatedBook;
     },
 
     async stats(userId: string): Promise<{ totalBooks: number; totalFavorites: number; totalGenres: number; booksThisMonth: number }> {
-        const books = await getAllUserBooks(userId);
+        const allBooks = await getAllBooks();
+        const books = allBooks.filter((book) => book.userId === userId);
         const now = new Date();
         const thisMonth = books.filter((book) => {
             const date = new Date(book.createdAt);
@@ -545,14 +572,16 @@ export const Books = {
     },
 
     async recent(userId: string, limit = 6): Promise<Book[]> {
-        const books = await getAllUserBooks(userId);
+        const allBooks = await getAllBooks();
+        const books = allBooks.filter((book) => book.userId === userId);
         return books
             .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
             .slice(0, limit);
     },
 
     async genreStats(userId: string): Promise<{ genre: string; count: number }[]> {
-        const books = await getAllUserBooks(userId);
+        const allBooks = await getAllBooks();
+        const books = allBooks.filter((book) => book.userId === userId);
         const map: Record<string, number> = {};
 
         for (const book of books) {
@@ -562,5 +591,106 @@ export const Books = {
         return Object.entries(map)
             .map(([genre, count]) => ({ genre, count }))
             .sort((a, b) => b.count - a.count);
+    },
+};
+
+export const Users = {
+    async list(): Promise<DirectoryUser[]> {
+        const snapshot = await withTimeout(getDocs(collection(db, "users")));
+        const users = snapshot.docs.map((userDoc) =>
+            normalizeDirectoryUser(userDoc.id, userDoc.data()),
+        );
+
+        return users.sort((a, b) => a.name.localeCompare(b.name, "es"));
+    },
+
+    async create(data: {
+        name: string;
+        email: string;
+        password: string;
+        role: UserRole;
+    }): Promise<DirectoryUser> {
+        ensureOnlineForWrite();
+
+        const secondaryAppName = `users-crud-${Date.now()}`;
+        const secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
+        const secondaryAuth = getAuth(secondaryApp);
+
+        let createdAuthUser: FirebaseUser | null = null;
+
+        const payload = {
+            name: data.name,
+            email: data.email,
+            createdAt: new Date().toISOString(),
+            role: data.role,
+        };
+
+        try {
+            const credentials = await withTimeout(
+                createUserWithEmailAndPassword(secondaryAuth, data.email, data.password),
+                FIRESTORE_WRITE_TIMEOUT_MS,
+            );
+            createdAuthUser = credentials.user;
+
+            await withTimeout(
+                setDoc(doc(db, "users", createdAuthUser.uid), payload),
+                FIRESTORE_WRITE_TIMEOUT_MS,
+            );
+
+            return normalizeDirectoryUser(createdAuthUser.uid, payload);
+        } catch (error) {
+            if (createdAuthUser) {
+                try {
+                    await deleteUser(createdAuthUser);
+                } catch {
+                    // Best effort rollback when profile creation fails.
+                }
+            }
+            throw error;
+        } finally {
+            await deleteApp(secondaryApp);
+        }
+    },
+
+    async update(
+        id: string,
+        data: Partial<Pick<DirectoryUser, "name" | "email" | "role">>,
+    ): Promise<DirectoryUser | null> {
+        ensureOnlineForWrite();
+
+        const userRef = doc(db, "users", id);
+        const snapshot = await withTimeout(getDoc(userRef));
+        if (!snapshot.exists()) {
+            return null;
+        }
+
+        const current = normalizeDirectoryUser(snapshot.id, snapshot.data());
+
+        await withTimeout(
+            updateDoc(userRef, {
+                ...(data.name !== undefined ? { name: data.name } : {}),
+                ...(data.email !== undefined ? { email: data.email } : {}),
+                ...(data.role !== undefined ? { role: data.role } : {}),
+            }),
+            FIRESTORE_WRITE_TIMEOUT_MS,
+        );
+
+        return {
+            ...current,
+            ...data,
+        };
+    },
+
+    async delete(id: string): Promise<boolean> {
+        ensureOnlineForWrite();
+
+        const userRef = doc(db, "users", id);
+        const snapshot = await withTimeout(getDoc(userRef));
+        if (!snapshot.exists()) {
+            return false;
+        }
+
+        await withTimeout(deleteDoc(userRef), FIRESTORE_WRITE_TIMEOUT_MS);
+        return true;
     },
 };

@@ -36,6 +36,8 @@ export default function BookDetailPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [book, setBook] = useState<Book | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const canManageBook =
+    !!user && !!book && user.id === book.userId && user.role !== "usuario";
 
   useEffect(() => {
     if (!user) {
@@ -129,21 +131,23 @@ export default function BookDetailPage() {
           </div>
 
           <div className="flex gap-2 mt-4">
-            <Button
-              data-testid="button-favorite"
-              variant="outline"
-              className={cn(
-                "flex-1 gap-1.5",
-                book.isFavorite &&
-                  "border-rose-300 text-rose-600 bg-rose-50 dark:bg-rose-950/30 hover:bg-rose-100",
-              )}
-              onClick={() => void handleFavorite()}
-            >
-              <Heart
-                className={cn("h-4 w-4", book.isFavorite && "fill-current")}
-              />
-              {book.isFavorite ? "Favorito" : "Añadir"}
-            </Button>
+            {canManageBook ? (
+              <Button
+                data-testid="button-favorite"
+                variant="outline"
+                className={cn(
+                  "flex-1 gap-1.5",
+                  book.isFavorite &&
+                    "border-rose-300 text-rose-600 bg-rose-50 dark:bg-rose-950/30 hover:bg-rose-100",
+                )}
+                onClick={() => void handleFavorite()}
+              >
+                <Heart
+                  className={cn("h-4 w-4", book.isFavorite && "fill-current")}
+                />
+                {book.isFavorite ? "Favorito" : "Añadir"}
+              </Button>
+            ) : null}
           </div>
         </div>
 
@@ -158,29 +162,31 @@ export default function BookDetailPage() {
               </h1>
               <p className="text-lg text-muted-foreground">{book.author}</p>
             </div>
-            <div className="flex gap-2 shrink-0">
-              <Link href={`/books/${book.id}/edit`} data-testid="link-edit">
+            {canManageBook ? (
+              <div className="flex gap-2 shrink-0">
+                <Link href={`/books/${book.id}/edit`} data-testid="link-edit">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    asChild={false}
+                  >
+                    <Edit className="h-3.5 w-3.5" />
+                    Editar
+                  </Button>
+                </Link>
                 <Button
+                  data-testid="button-delete"
                   variant="outline"
                   size="sm"
-                  className="gap-1.5"
-                  asChild={false}
+                  className="gap-1.5 text-destructive hover:bg-destructive/10 border-destructive/30"
+                  onClick={() => setShowDeleteModal(true)}
                 >
-                  <Edit className="h-3.5 w-3.5" />
-                  Editar
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Eliminar
                 </Button>
-              </Link>
-              <Button
-                data-testid="button-delete"
-                variant="outline"
-                size="sm"
-                className="gap-1.5 text-destructive hover:bg-destructive/10 border-destructive/30"
-                onClick={() => setShowDeleteModal(true)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Eliminar
-              </Button>
-            </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex flex-wrap gap-2 mb-6">
@@ -233,7 +239,10 @@ export default function BookDetailPage() {
         </div>
       </div>
 
-      <Dialog open={showDeleteModal} onOpenChange={setShowDeleteModal}>
+      <Dialog
+        open={showDeleteModal && canManageBook}
+        onOpenChange={setShowDeleteModal}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Eliminar libro</DialogTitle>

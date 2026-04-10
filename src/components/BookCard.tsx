@@ -2,6 +2,7 @@ import { Heart, BookOpen } from "lucide-react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
 import { Books, type Book } from "@/lib/store";
+import { useAuth } from "@/contexts/AuthContext";
 
 const GENRE_COLORS: Record<string, string> = {
   Ficción: "from-emerald-600 to-green-700",
@@ -23,10 +24,17 @@ export function BookCard({
   book: Book;
   onFavoriteToggle?: () => void;
 }) {
+  const { user } = useAuth();
+  const canManageBook = user?.id === book.userId && user.role !== "usuario";
+
   async function handleFavorite(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    await Books.toggleFavorite(book.id, book.userId);
+    if (!user || !canManageBook) {
+      return;
+    }
+
+    await Books.toggleFavorite(book.id, user.id);
     onFavoriteToggle?.();
   }
 
@@ -67,20 +75,25 @@ export function BookCard({
               </span>
             </div>
 
-            <button
-              onClick={(e) => void handleFavorite(e)}
-              data-testid={`button-favorite-${book.id}`}
-              className={cn(
-                "absolute top-2 right-2 p-1.5 rounded-full backdrop-blur-sm transition-all duration-200",
-                book.isFavorite
-                  ? "bg-rose-500/90 text-white"
-                  : "bg-black/30 text-white/70 hover:bg-black/50 hover:text-white",
-              )}
-            >
-              <Heart
-                className={cn("h-3.5 w-3.5", book.isFavorite && "fill-current")}
-              />
-            </button>
+            {canManageBook ? (
+              <button
+                onClick={(e) => void handleFavorite(e)}
+                data-testid={`button-favorite-${book.id}`}
+                className={cn(
+                  "absolute top-2 right-2 p-1.5 rounded-full backdrop-blur-sm transition-all duration-200",
+                  book.isFavorite
+                    ? "bg-rose-500/90 text-white"
+                    : "bg-black/30 text-white/70 hover:bg-black/50 hover:text-white",
+                )}
+              >
+                <Heart
+                  className={cn(
+                    "h-3.5 w-3.5",
+                    book.isFavorite && "fill-current",
+                  )}
+                />
+              </button>
+            ) : null}
           </div>
 
           <div className="p-3">

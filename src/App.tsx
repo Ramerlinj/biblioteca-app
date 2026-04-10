@@ -1,10 +1,4 @@
-import {
-  Switch,
-  Route,
-  Router as WouterRouter,
-  useLocation,
-  Redirect,
-} from "wouter";
+import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -18,8 +12,10 @@ import BookDetailPage from "@/pages/book-detail";
 import BookFormPage from "@/pages/book-form";
 import DashboardPage from "@/pages/dashboard";
 import ProfilePage from "@/pages/profile";
+import UsersPage from "@/pages/users";
 import NotFound from "@/pages/not-found";
 import { FullPageLoading } from "@/components/LoadingState";
+import type { UserRole } from "@/lib/store";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -32,16 +28,21 @@ const queryClient = new QueryClient({
 
 function ProtectedRoute({
   component: Component,
+  allowedRoles,
   ...props
 }: {
   component: React.ComponentType<Record<string, unknown>>;
+  allowedRoles?: UserRole[];
   [key: string]: unknown;
 }) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
   if (isLoading) {
     return <FullPageLoading label="Sincronizando sesión" />;
   }
   if (!isAuthenticated) return <Redirect to="/login" />;
+  if (allowedRoles && user && !allowedRoles.includes(user.role)) {
+    return <Redirect to="/" />;
+  }
   return (
     <Layout>
       <Component {...props} />
@@ -77,10 +78,16 @@ function Router() {
         />
       </Route>
       <Route path="/books/new">
-        <ProtectedRoute component={() => <BookFormPage mode="create" />} />
+        <ProtectedRoute
+          component={() => <BookFormPage mode="create" />}
+          allowedRoles={["admin", "superadmin"]}
+        />
       </Route>
       <Route path="/books/:id/edit">
-        <ProtectedRoute component={() => <BookFormPage mode="edit" />} />
+        <ProtectedRoute
+          component={() => <BookFormPage mode="edit" />}
+          allowedRoles={["admin", "superadmin"]}
+        />
       </Route>
       <Route path="/books/:id">
         <ProtectedRoute
@@ -94,6 +101,12 @@ function Router() {
           component={
             DashboardPage as React.ComponentType<Record<string, unknown>>
           }
+        />
+      </Route>
+      <Route path="/users">
+        <ProtectedRoute
+          component={UsersPage as React.ComponentType<Record<string, unknown>>}
+          allowedRoles={["admin", "superadmin"]}
         />
       </Route>
       <Route path="/profile">

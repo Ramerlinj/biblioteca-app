@@ -29,3 +29,4 @@ Thumbs.db
 
 .local
 *.local/
+.vercel

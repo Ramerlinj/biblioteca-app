@@ -2,6 +2,7 @@ import { Link, useLocation } from "wouter";
 import {
   PlusCircle,
   LayoutDashboard,
+  Users,
   User,
   LogOut,
   Sun,
@@ -11,18 +12,37 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { cn } from "@/lib/utils";
+import type { UserRole } from "@/lib/store";
+import Analityts from "@/components/Analityts";
 
-const navItems = [
+const navItems: Array<{
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  roles?: UserRole[];
+}> = [
   { href: "/", label: "Biblioteca", icon: Library },
-  { href: "/books/new", label: "Añadir libro", icon: PlusCircle },
+  {
+    href: "/books/new",
+    label: "Añadir libro",
+    icon: PlusCircle,
+    roles: ["admin", "superadmin"],
+  },
+  {
+    href: "/users",
+    label: "Usuarios",
+    icon: Users,
+    roles: ["admin", "superadmin"],
+  },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/profile", label: "Perfil", icon: User },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const currentRole = user?.role ?? "usuario";
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -44,26 +64,28 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="flex-1 px-3 space-y-1">
-          {navItems.map(({ href, label, icon: Icon }) => {
-            const isActive =
-              href === "/" ? location === "/" : location.startsWith(href);
-            return (
-              <Link key={href} href={href}>
-                <span
-                  data-testid={`nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
-                  className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 cursor-pointer",
-                    isActive
-                      ? "bg-primary text-primary-foreground shadow-sm"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                  )}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  {label}
-                </span>
-              </Link>
-            );
-          })}
+          {navItems
+            .filter((item) => !item.roles || item.roles.includes(currentRole))
+            .map(({ href, label, icon: Icon }) => {
+              const isActive =
+                href === "/" ? location === "/" : location.startsWith(href);
+              return (
+                <Link key={href} href={href}>
+                  <span
+                    data-testid={`nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
+                    className={cn(
+                      "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 cursor-pointer",
+                      isActive
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                    )}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {label}
+                  </span>
+                </Link>
+              );
+            })}
         </nav>
 
         <div className="px-3 pb-6 space-y-1 border-t border-sidebar-border pt-4 mt-4">

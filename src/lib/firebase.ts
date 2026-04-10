@@ -3,7 +3,7 @@ import { getAuth } from "firebase/auth";
 import type { Firestore } from "firebase/firestore";
 import { getFirestore, initializeFirestore } from "firebase/firestore";
 
-const firebaseConfig = {
+export const firebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
     authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
     projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
@@ -20,7 +20,7 @@ if (missingKeys.length > 0) {
     console.warn(`Firebase config incompleta. Faltan: ${missingKeys.join(", ")}`);
 }
 
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 
